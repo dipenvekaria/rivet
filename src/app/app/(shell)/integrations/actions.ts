@@ -51,26 +51,15 @@ export async function enableVoice() {
     return { ok: false as const, error: 'Call answering is not configured on the platform yet.' }
   }
 
-  const [company] = await query<{ name: string; trade: string | null; address: string | null; phone: string | null; email: string | null; retell_agent_id: string | null }>(
-    `select name, trade, address, phone, email, retell_agent_id from companies where id = $1 limit 1`,
+  const [company] = await query<{ name: string; phone: string | null; email: string | null; retell_agent_id: string | null }>(
+    `select name, phone, email, retell_agent_id from companies where id = $1 limit 1`,
     [session.companyId],
   )
   if (!company) return { ok: false as const, error: 'Company not found' }
 
-  // The agent's business summary: what the company does, never what it
-  // charges. Item names are advertising; prices stay withheld by design.
-  const serviceRows = await query<{ name: string }>(
-    `select name from catalog_items where company_id = $1 and coalesce(is_active, true)
-      order by name limit 15`,
-    [session.companyId],
-  )
-  const area = company.address?.match(/([A-Za-z .'-]+),\s*([A-Z]{2})\b/)
-  const agentCompany = {
-    name: company.name,
-    trade: company.trade,
-    area: area ? `${area[1].trim()}, ${area[2]}` : null,
-    services: serviceRows.map((r) => r.name),
-  }
+  const { loadAgentCompany } = await import('@/lib/voice/company')
+  const agentCompany = await loadAgentCompany(session.companyId)
+  if (!agentCompany) return { ok: false as const, error: 'Company not found' }
 
   let number: string
   try {
