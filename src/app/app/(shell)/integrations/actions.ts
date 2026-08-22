@@ -51,8 +51,8 @@ export async function enableVoice() {
     return { ok: false as const, error: 'Call answering is not configured on the platform yet.' }
   }
 
-  const [company] = await query<{ name: string; phone: string | null; email: string | null; retell_agent_id: string | null }>(
-    `select name, phone, email, retell_agent_id from companies where id = $1 limit 1`,
+  const [company] = await query<{ name: string; trade: string | null; phone: string | null; email: string | null; retell_agent_id: string | null }>(
+    `select name, trade, phone, email, retell_agent_id from companies where id = $1 limit 1`,
     [session.companyId],
   )
   if (!company) return { ok: false as const, error: 'Company not found' }
@@ -61,7 +61,7 @@ export async function enableVoice() {
   try {
     let agentId = company.retell_agent_id
     if (!agentId) {
-      agentId = (await createCompanyAgent(company.name)).agent_id
+      agentId = (await createCompanyAgent(company.name, company.trade)).agent_id
       // Persisted before the number step: a failure there must not strand the
       // agent in Retell and mint a duplicate on every retry (it did).
       await query(`update companies set retell_agent_id = $2 where id = $1`, [
