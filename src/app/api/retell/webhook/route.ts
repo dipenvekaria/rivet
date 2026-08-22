@@ -17,19 +17,26 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(req: NextRequest) {
   const { RETELL_SECRET_WEBHOOK_KEY, RETELL_API_KEY } = envServer()
-  const signingKey = RETELL_SECRET_WEBHOOK_KEY ?? RETELL_API_KEY
-  if (!signingKey) return NextResponse.json({ error: 'not configured' }, { status: 503 })
+  const keys = [RETELL_SECRET_WEBHOOK_KEY, RETELL_API_KEY].filter((k): k is string => Boolean(k))
+  if (keys.length === 0) return NextResponse.json({ error: 'not configured' }, { status: 503 })
 
   const raw = await req.text()
+  // Retell signs v={unix_ms},d=hex(HMAC-SHA256(raw_body + timestamp, api_key)).
+  // The first version of this route verified a bare digest of the body alone —
+  // self-consistent with its own test, and 401 for every real call.
   const sig = req.headers.get('x-retell-signature') ?? ''
-  const expected = createHmac('sha256', signingKey).update(raw).digest('hex')
+  const parsed = sig.match(/^v=(\d+),d=([a-f0-9]{64})$/)
+  const fresh = parsed && Math.abs(Date.now() - Number(parsed[1])) < 5 * 60_000
   const ok =
-    sig.length === expected.length &&
-    timingSafeEqual(Buffer.from(sig), Buffer.from(expected))
+    Boolean(parsed && fresh) &&
+    keys.some((key) => {
+      const expected = createHmac('sha256', key).update(raw + parsed![1]).digest('hex')
+      return timingSafeEqual(Buffer.from(parsed![2]), Buffer.from(expected))
+    })
   if (!ok) {
     // Loud on purpose: a scheme mismatch here must surface on the first real
     // call, not read as "voice silently does nothing".
-    console.error('retell webhook signature rejected')
+    console.error('retell webhook signature rejected', parsed ? 'digest/replay' : 'format')
     return NextResponse.json({ error: 'bad signature' }, { status: 401 })
   }
 

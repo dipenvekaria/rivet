@@ -15,13 +15,17 @@ const NUMBER = '+15559990000'
 const CALLER = '+15551230000'
 let companyId: string
 
-function signedRequest(body: unknown): NextRequest {
+function signedRequest(body: unknown, opts?: { staleMs?: number }): NextRequest {
   const raw = JSON.stringify(body)
-  const sig = createHmac('sha256', SIGNING_KEY).update(raw).digest('hex')
+  // The real Retell scheme: v={unix_ms},d=hmac(raw+timestamp). The first
+  // version of this test signed a bare body digest — it validated the route
+  // against itself while production 401'd every genuine call.
+  const ts = String(Date.now() - (opts?.staleMs ?? 0))
+  const digest = createHmac('sha256', SIGNING_KEY).update(raw + ts).digest('hex')
   return new NextRequest('http://localhost/api/retell/webhook', {
     method: 'POST',
     body: raw,
-    headers: { 'x-retell-signature': sig },
+    headers: { 'x-retell-signature': `v=${ts},d=${digest}` },
   })
 }
 
@@ -59,6 +63,12 @@ afterAll(async () => {
 })
 
 describe('retell webhook', () => {
+  it('rejects a stale timestamp (replay)', async () => {
+    const { POST } = await import('@/app/api/retell/webhook/route')
+    const res = await POST(signedRequest(event('test_call_replay'), { staleMs: 6 * 60_000 }))
+    expect(res.status).toBe(401)
+  })
+
   it('rejects a bad signature', async () => {
     const { POST } = await import('@/app/api/retell/webhook/route')
     const raw = JSON.stringify(event('test_call_sig'))

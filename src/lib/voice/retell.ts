@@ -46,9 +46,27 @@ async function retell<T>(path: string, init?: RequestInit): Promise<T> {
  * and words and never assumes the work. It books the callback; it does not
  * quote, promise times, or invent prices.
  */
-function agentPrompt(companyName: string, trade: string | null): string {
-  const who = trade ? `${companyName}, a ${trade} company` : companyName
-  return `You answer the phone for ${who}. You are their scheduling assistant — warm, brief, and professional.
+export type AgentCompany = {
+  name: string
+  trade: string | null
+  /** "City, ST" pulled from the business address; null when unparsable. */
+  area: string | null
+  /** Catalog item names only — what the company does, never what it charges. */
+  services: string[]
+}
+
+function agentPrompt(company: AgentCompany): string {
+  const who = company.trade ? `${company.name}, a ${company.trade} company` : company.name
+  const about = [
+    company.area ? `Based in ${company.area}.` : null,
+    company.services.length
+      ? `Services include: ${company.services.join(', ')}.`
+      : null,
+  ].filter(Boolean)
+  const aboutBlock = about.length
+    ? `\n\nAbout the business (use only to understand and acknowledge what the caller needs — never to quote prices or promise availability):\n${about.join('\n')}`
+    : ''
+  return `You answer the phone for ${who}. You are their scheduling assistant — warm, brief, and professional.${aboutBlock}
 
 Your one job: capture the caller's request so the team can call back with next steps.
 
@@ -63,7 +81,7 @@ Rules:
 - Never claim a person is available right now.
 - If it is an emergency involving immediate danger (gas smell, major flooding, sparks), tell them to hang up and call emergency services or their utility first.
 - Keep replies to one or two sentences. No filler.
-- Close by confirming their name and address back to them and saying ${companyName} will follow up shortly.`
+- Close by confirming their name and address back to them and saying ${company.name} will follow up shortly.`
 }
 
 export type RetellAgent = { agent_id: string; llm_id: string }
@@ -72,21 +90,25 @@ export type RetellAgent = { agent_id: string; llm_id: string }
  * One company's agent: a Retell LLM (the Gemini brain + prompt) and the agent
  * shell around it. Returns ids to store on the company row.
  */
-export async function createCompanyAgent(companyName: string, trade: string | null): Promise<RetellAgent> {
+/** Warm, professional female voice from Retell's 11labs catalog. If their
+ * catalog moves and creation rejects it, the fix is this constant. */
+const RETELL_VOICE_ID = '11labs-Chloe'
+
+export async function createCompanyAgent(company: AgentCompany): Promise<RetellAgent> {
   const llm = await retell<{ llm_id: string }>('/create-retell-llm', {
     method: 'POST',
     body: JSON.stringify({
       model: RETELL_GEMINI_MODEL,
-      general_prompt: agentPrompt(companyName, trade),
+      general_prompt: agentPrompt(company),
     }),
   })
 
   const agent = await retell<{ agent_id: string }>('/create-agent', {
     method: 'POST',
     body: JSON.stringify({
-      agent_name: `${companyName} — Rivet answering`,
+      agent_name: `${company.name} — Rivet answering`,
       response_engine: { type: 'retell-llm', llm_id: llm.llm_id },
-      voice_id: '11labs-Adrian',
+      voice_id: RETELL_VOICE_ID,
       language: 'en-US',
       enable_backchannel: true,
       webhook_url: `${env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/api/retell/webhook`,
@@ -101,6 +123,28 @@ export async function createCompanyAgent(companyName: string, trade: string | nu
  * service on and never learns what telephony is. ~$2/mo, billed to the
  * platform's Retell account.
  */
+/**
+ * Bring an existing agent up to date: current prompt (trade, area, services)
+ * and the current house voice. Runs on re-enable, so agents created before a
+ * prompt improvement are not frozen at their creation date.
+ */
+export async function refreshCompanyAgent(agentId: string, company: AgentCompany): Promise<void> {
+  const agent = await retell<{ response_engine?: { llm_id?: string } }>(
+    `/get-agent/${encodeURIComponent(agentId)}`,
+  )
+  const llmId = agent.response_engine?.llm_id
+  if (llmId) {
+    await retell(`/update-retell-llm/${encodeURIComponent(llmId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ general_prompt: agentPrompt(company) }),
+    })
+  }
+  await retell(`/update-agent/${encodeURIComponent(agentId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ voice_id: RETELL_VOICE_ID }),
+  })
+}
+
 export async function purchaseNumber(
   agentId: string,
   nickname: string,
