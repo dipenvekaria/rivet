@@ -45,7 +45,7 @@ export async function inviteTeammate(input: { email: string; role: string }) {
     return {
       ok: false as const,
       error:
-        'Solo is a one-person plan. Switch to Team in Settings → Billing to invite your crew — everything else stays the same.',
+        'Solo is a one-person plan. Team gives each person their own login — technicians never see your revenue, every action is signed by who did it, and you can schedule people separately. Switch in Settings → Billing.',
     }
   }
 
