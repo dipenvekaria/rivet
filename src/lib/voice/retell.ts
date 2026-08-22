@@ -46,8 +46,9 @@ async function retell<T>(path: string, init?: RequestInit): Promise<T> {
  * and words and never assumes the work. It books the callback; it does not
  * quote, promise times, or invent prices.
  */
-function agentPrompt(companyName: string): string {
-  return `You answer the phone for ${companyName}. You are their scheduling assistant — warm, brief, and professional.
+function agentPrompt(companyName: string, trade: string | null): string {
+  const who = trade ? `${companyName}, a ${trade} company` : companyName
+  return `You answer the phone for ${who}. You are their scheduling assistant — warm, brief, and professional.
 
 Your one job: capture the caller's request so the team can call back with next steps.
 
@@ -71,12 +72,12 @@ export type RetellAgent = { agent_id: string; llm_id: string }
  * One company's agent: a Retell LLM (the Gemini brain + prompt) and the agent
  * shell around it. Returns ids to store on the company row.
  */
-export async function createCompanyAgent(companyName: string): Promise<RetellAgent> {
+export async function createCompanyAgent(companyName: string, trade: string | null): Promise<RetellAgent> {
   const llm = await retell<{ llm_id: string }>('/create-retell-llm', {
     method: 'POST',
     body: JSON.stringify({
       model: RETELL_GEMINI_MODEL,
-      general_prompt: agentPrompt(companyName),
+      general_prompt: agentPrompt(companyName, trade),
     }),
   })
 
