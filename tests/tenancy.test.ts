@@ -59,12 +59,27 @@ const EXEMPT: Array<{ file: string; match: string; reason: string }> = [
   },
   {
     file: 'src/app/app/(shell)/integrations/actions.ts',
-    match: 'select name, trade, address, phone, email, retell_agent_id from companies where id = $1',
+    match: 'select name, phone, email, retell_agent_id from companies where id = $1',
     reason: '$1 is session.companyId; companies.id is the tenant key itself.',
   },
   {
     file: 'src/app/app/(shell)/calls/page.tsx',
-    match: 'select voice_enabled, voice_number, settings from companies where id = $1',
+    match: 'select name, voice_enabled, voice_number, settings from companies where id = $1',
+    reason: 'companies row fetched by the session company id itself — the id is the tenant key.',
+  },
+  {
+    file: 'src/lib/voice/company.ts',
+    match: 'select name, trade, address, settings from companies where id = $1',
+    reason: 'companies row fetched by the caller-supplied company id, which every caller takes from the session.',
+  },
+  {
+    file: 'src/app/app/(shell)/calls/actions.ts',
+    match: "update companies set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{voice}', $2::jsonb) where id = $1",
+    reason: 'companies row updated by the session company id itself — the id is the tenant key.',
+  },
+  {
+    file: 'src/app/app/(shell)/calls/actions.ts',
+    match: 'select retell_agent_id from companies where id = $1',
     reason: 'companies row fetched by the session company id itself — the id is the tenant key.',
   },
   {

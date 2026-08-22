@@ -8,6 +8,7 @@ import { companyTz } from '@/lib/time'
 import { query } from '@/lib/db'
 
 import { CallRow } from './call-row'
+import { VoiceSettingsCard } from './voice-settings-card'
 
 export const metadata = { title: 'Calls' }
 export const dynamic = 'force-dynamic'
@@ -23,11 +24,20 @@ export default async function CallsPage() {
   // same audience as the pipeline's money view.
   const canSee = role === 'owner' || role === 'office'
 
-  const [company] = await query<{ voice_enabled: boolean; voice_number: string | null; settings: { timezone?: string } | null }>(
-    `select voice_enabled, voice_number, settings from companies where id = $1`,
+  const [company] = await query<{
+    name: string
+    voice_enabled: boolean
+    voice_number: string | null
+    settings: {
+      timezone?: string
+      voice?: { greeting?: string; notes?: string; transfer_number?: string }
+    } | null
+  }>(
+    `select name, voice_enabled, voice_number, settings from companies where id = $1`,
     [companyId],
   )
   const tz = companyTz({ timezone: company?.settings?.timezone ?? null })
+  const voiceSettings = company?.settings?.voice ?? {}
 
   const calls = canSee
     ? await query<{
@@ -88,7 +98,19 @@ export default async function CallsPage() {
             }
           />
         </div>
-      ) : calls.length === 0 ? (
+      ) : (
+        <>
+          {role === 'owner' && (
+            <div className="mt-6">
+              <VoiceSettingsCard
+                greeting={voiceSettings.greeting ?? ''}
+                notes={voiceSettings.notes ?? ''}
+                transferNumber={voiceSettings.transfer_number ?? ''}
+                companyName={company?.name ?? 'your company'}
+              />
+            </div>
+          )}
+          {calls.length === 0 ? (
         <div className="mt-6">
           <EmptyState
             icon={PhoneIncoming}
@@ -96,14 +118,16 @@ export default async function CallsPage() {
             description={`When someone calls ${pretty ?? 'your number'}, the call and its transcript appear here.`}
           />
         </div>
-      ) : (
-        <Section className="mt-6" flush>
-          <ul className="divide-y divide-border/70">
-            {calls.map((call) => (
-              <CallRow key={call.id} call={call} tz={tz} />
-            ))}
-          </ul>
-        </Section>
+          ) : (
+            <Section className="mt-6" flush>
+              <ul className="divide-y divide-border/70">
+                {calls.map((call) => (
+                  <CallRow key={call.id} call={call} tz={tz} />
+                ))}
+              </ul>
+            </Section>
+          )}
+        </>
       )}
     </PageContainer>
   )

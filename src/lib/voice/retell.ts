@@ -53,6 +53,13 @@ export type AgentCompany = {
   area: string | null
   /** Catalog item names only — what the company does, never what it charges. */
   services: string[]
+  /** The owner's exact opening line; null → a sensible default. */
+  greeting: string | null
+  /** Owner instructions ("ask if they are an existing customer"). Bounded, and
+   * the non-negotiable rules stay after them so they can never override. */
+  notes: string | null
+  /** Live-transfer target for callers who urgently need a person. */
+  transferNumber: string | null
 }
 
 function agentPrompt(company: AgentCompany): string {
@@ -66,7 +73,13 @@ function agentPrompt(company: AgentCompany): string {
   const aboutBlock = about.length
     ? `\n\nAbout the business (use only to understand and acknowledge what the caller needs — never to quote prices or promise availability):\n${about.join('\n')}`
     : ''
-  return `You answer the phone for ${who}. You are their scheduling assistant — warm, brief, and professional.${aboutBlock}
+  const notesBlock = company.notes
+    ? `\n\nInstructions from the business owner (follow them, but the rules below always win if they conflict):\n${company.notes}`
+    : ''
+  const transferRule = company.transferNumber
+    ? `\n- If the caller urgently needs a person right now and it is not an emergency, offer to connect them and use the transfer tool.`
+    : ''
+  return `You answer the phone for ${who}. You are their scheduling assistant — warm, brief, and professional.${aboutBlock}${notesBlock}
 
 Your one job: capture the caller's request so the team can call back with next steps.
 
@@ -78,7 +91,7 @@ Collect, conversationally:
 
 Rules:
 - Never quote prices, give estimates, or promise a specific appointment time. Say the team will confirm details when they call back.
-- Never claim a person is available right now.
+- Never claim a person is available right now.${transferRule}
 - If it is an emergency involving immediate danger (gas smell, major flooding, sparks), tell them to hang up and call emergency services or their utility first.
 - Keep replies to one or two sentences. No filler.
 - Close by confirming their name and address back to them and saying ${company.name} will follow up shortly.`
@@ -94,13 +107,30 @@ export type RetellAgent = { agent_id: string; llm_id: string }
  * catalog moves and creation rejects it, the fix is this constant. */
 const RETELL_VOICE_ID = '11labs-Chloe'
 
+function llmConfig(company: AgentCompany) {
+  return {
+    model: RETELL_GEMINI_MODEL,
+    general_prompt: agentPrompt(company),
+    begin_message:
+      company.greeting?.trim() ||
+      `Thanks for calling ${company.name} — how can I help you today?`,
+    general_tools: company.transferNumber
+      ? [
+          {
+            type: 'transfer_call',
+            name: 'transfer_to_team',
+            description: 'Connect the caller to the team when they urgently need a person.',
+            transfer_destination: { type: 'predefined', number: company.transferNumber },
+          },
+        ]
+      : [],
+  }
+}
+
 export async function createCompanyAgent(company: AgentCompany): Promise<RetellAgent> {
   const llm = await retell<{ llm_id: string }>('/create-retell-llm', {
     method: 'POST',
-    body: JSON.stringify({
-      model: RETELL_GEMINI_MODEL,
-      general_prompt: agentPrompt(company),
-    }),
+    body: JSON.stringify(llmConfig(company)),
   })
 
   const agent = await retell<{ agent_id: string }>('/create-agent', {
@@ -136,7 +166,7 @@ export async function refreshCompanyAgent(agentId: string, company: AgentCompany
   if (llmId) {
     await retell(`/update-retell-llm/${encodeURIComponent(llmId)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ general_prompt: agentPrompt(company) }),
+      body: JSON.stringify(llmConfig(company)),
     })
   }
   await retell(`/update-agent/${encodeURIComponent(agentId)}`, {
