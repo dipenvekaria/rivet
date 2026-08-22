@@ -46,28 +46,47 @@ export async function enableVoice() {
     return { ok: false as const, error: 'Only the owner can set up call answering.' }
   }
 
-  const { voiceConfigured, createCompanyAgent, purchaseNumber } = await import('@/lib/voice/retell')
+  const { voiceConfigured, createCompanyAgent, refreshCompanyAgent, purchaseNumber } = await import('@/lib/voice/retell')
   if (!voiceConfigured()) {
     return { ok: false as const, error: 'Call answering is not configured on the platform yet.' }
   }
 
-  const [company] = await query<{ name: string; trade: string | null; phone: string | null; email: string | null; retell_agent_id: string | null }>(
-    `select name, trade, phone, email, retell_agent_id from companies where id = $1 limit 1`,
+  const [company] = await query<{ name: string; trade: string | null; address: string | null; phone: string | null; email: string | null; retell_agent_id: string | null }>(
+    `select name, trade, address, phone, email, retell_agent_id from companies where id = $1 limit 1`,
     [session.companyId],
   )
   if (!company) return { ok: false as const, error: 'Company not found' }
+
+  // The agent's business summary: what the company does, never what it
+  // charges. Item names are advertising; prices stay withheld by design.
+  const serviceRows = await query<{ name: string }>(
+    `select name from catalog_items where company_id = $1 and coalesce(is_active, true)
+      order by name limit 15`,
+    [session.companyId],
+  )
+  const area = company.address?.match(/([A-Za-z .'-]+),\s*([A-Z]{2})\b/)
+  const agentCompany = {
+    name: company.name,
+    trade: company.trade,
+    area: area ? `${area[1].trim()}, ${area[2]}` : null,
+    services: serviceRows.map((r) => r.name),
+  }
 
   let number: string
   try {
     let agentId = company.retell_agent_id
     if (!agentId) {
-      agentId = (await createCompanyAgent(company.name, company.trade)).agent_id
+      agentId = (await createCompanyAgent(agentCompany)).agent_id
       // Persisted before the number step: a failure there must not strand the
       // agent in Retell and mint a duplicate on every retry (it did).
       await query(`update companies set retell_agent_id = $2 where id = $1`, [
         session.companyId,
         agentId,
       ])
+    } else {
+      // Re-enabling refreshes an old agent's prompt and voice — agents are
+      // not frozen at whatever the code did the day they were created.
+      await refreshCompanyAgent(agentId, agentCompany)
     }
 
     // Their own area code when Retell stocks it, any number when not — the

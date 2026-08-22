@@ -59,7 +59,7 @@ const EXEMPT: Array<{ file: string; match: string; reason: string }> = [
   },
   {
     file: 'src/app/app/(shell)/integrations/actions.ts',
-    match: 'select name, trade, phone, email, retell_agent_id from companies where id = $1',
+    match: 'select name, trade, address, phone, email, retell_agent_id from companies where id = $1',
     reason: '$1 is session.companyId; companies.id is the tenant key itself.',
   },
   {
